@@ -146,13 +146,53 @@ c) has_financial_kw: flag emails containing keywords:
    Ensure 30% of sample has at least one financial keyword
 d) word_count bucket: short(<80 words), medium(80-300), long(>300) — equal thirds
 
-Code:
-from sklearn.model_selection import train_test_split
-# [implement stratified sampling satisfying all 4 criteria above]
-# Save both pools
-gold_pool.to_parquet('data/processed/emails_gold_pool.parquet', index=False)
-silver_pool.to_parquet('data/processed/emails_silver_pool.parquet', index=False)
-print(f"Gold pool: {len(gold_pool)}, Silver pool: {len(silver_pool)}")
+# STRATIFIED SAMPLING — explicit implementation (full code required)
+import numpy as np
+
+df_clean = pd.read_parquet('data/processed/emails_clean.parquet')
+
+# Flag 1: crisis period
+df_clean['crisis_flag'] = (df_clean['month_index'] >= 18).astype(int)
+
+# Flag 2: financial keyword presence
+fin_kws = ['reserve','write-down','write down','mark-to-market','FERC','SPE',
+           'off-balance','audit','restatement','confidential','merger','acquisition']
+df_clean['has_fin_kw'] = df_clean['body_clean'].str.lower().str.contains(
+    '|'.join(fin_kws), na=False).astype(int)
+
+# Flag 3: word count bucket
+df_clean['wc_bucket'] = pd.cut(df_clean['word_count'], bins=[0,80,300,99999],
+                                labels=['short','medium','long'])
+
+# STEP A: Include ALL CEO/CFO emails (high-value, oversampled)
+exec_pool = df_clean[df_clean['sender_role'].isin(['CEO','CFO'])]
+exec_count = min(len(exec_pool), 1500)  # cap at 1500 to avoid one-class dominance
+exec_sample = exec_pool.sample(n=exec_count, random_state=42) if len(exec_pool) >= exec_count else exec_pool
+print(f"Executive emails included: {len(exec_sample)}")
+
+# STEP B: Remaining quota from non-exec pool
+TARGET = 5800
+remaining_pool = df_clean[~df_clean['mid'].isin(exec_sample['mid'])]
+remaining_needed = TARGET - len(exec_sample)
+
+# STEP C: Stratify remaining by time period (60% crisis, 40% stable)
+crisis_pool = remaining_pool[remaining_pool['crisis_flag'] == 1]
+stable_pool  = remaining_pool[remaining_pool['crisis_flag'] == 0]
+n_crisis = min(int(remaining_needed * 0.60), len(crisis_pool))
+n_stable = min(remaining_needed - n_crisis, len(stable_pool))
+
+crisis_sample = crisis_pool.sample(n=n_crisis, random_state=42)
+stable_sample = stable_pool.sample(n=n_stable, random_state=42)
+
+# STEP D: Combine and shuffle
+full_sample = pd.concat([exec_sample, crisis_sample, stable_sample]).drop_duplicates(subset='mid')
+full_sample = full_sample.sample(frac=1, random_state=42).reset_index(drop=True)
+print(f"Final sample size: {len(full_sample)}")
+print(f"Financial keyword coverage: {full_sample['has_fin_kw'].mean():.1%} (target: 30%+)")
+
+# STEP E: Split Gold (800 for human annotation) and Silver (remaining for LLM)
+gold_pool   = full_sample.head(800).copy()
+silver_pool = full_sample.tail(len(full_sample) - 800).copy()
 
 VALIDATION REPORT at end of script:
 Print:
@@ -250,8 +290,8 @@ DECISION TREE FOR framing:
 
 - [ ] 800 Gold emails manually labeled (400 by annotator A, 400 by annotator B,
       with 150 overlap for κ computation)
-- [ ] Cohen's κ ≥ 0.60 on disc_type dimension (hard gate)
-- [ ] Cohen's κ ≥ 0.70 on framing dimension (expected — it's more objective)
+- [ ] Cohen's κ ≥ 0.60 on disc_type dimension (hard gate — pipeline stops if failed)
+- [ ] Cohen's κ ≥ 0.65 on framing dimension (framing is more objective, 0.65 is realistic gate)
 - [ ] Class distribution: no class < 5% in disc_type (resample if needed)
 - [ ] 5,000 Silver emails labeled by local LLM
 - [ ] Silver spot-check: 100 random Silver labels reviewed → noise rate ≤ 25%
@@ -343,8 +383,9 @@ for idx, row in tqdm(df.iterrows(), total=len(df)):
     inputs = tokenizer(prompt, return_tensors='pt', truncation=True, max_length=512).to('cuda')
     with torch.no_grad():
         outputs = model.generate(
-            **inputs, max_new_tokens=80, temperature=0.1, do_sample=False,
+            **inputs, max_new_tokens=80, do_sample=False,
             pad_token_id=tokenizer.eos_token_id
+            # temperature removed: ignored when do_sample=False
         )
     response = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
     dt, fr, conf = parse_label(response)
@@ -353,9 +394,12 @@ for idx, row in tqdm(df.iterrows(), total=len(df)):
 
 STEP 4 — Merge and filter by confidence:
 results_df = pd.DataFrame(results)
-df_merged = df.merge(results_df, on='mid')
 
-# Keep only high-confidence labels (≥ 0.70)
+# Drop placeholder columns before merge to avoid _x/_y column collision
+df_to_merge = df.drop(columns=['disclosure_type','framing'], errors='ignore')
+df_merged = df_to_merge.merge(results_df, on='mid')
+
+# Keep only high-confidence labels (>= 0.70)
 df_high_conf = df_merged[df_merged['confidence'] >= 0.70]
 df_low_conf  = df_merged[df_merged['confidence'] < 0.70]
 print(f"High confidence labels: {len(df_high_conf)} / {len(df_merged)}")

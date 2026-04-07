@@ -203,6 +203,12 @@ for _, row in tqdm(high_risk_test.iterrows(), total=len(high_risk_test)):
     })
 
 STEP 6 — BERTScore faithfulness evaluation:
+# IMPORTANT: Free Mistral-7B VRAM before loading BERTScore model (4GB limit)
+del model
+torch.cuda.empty_cache()
+import gc; gc.collect()
+print("Mistral-7B unloaded. Running BERTScore with DistilBERT...")
+
 # Reference = the structured KG context (what the explanation SHOULD mention)
 # Hypothesis = generated explanation
 references   = [r['kg_context'] + ' ' + r['centrality_context'] for r in results]

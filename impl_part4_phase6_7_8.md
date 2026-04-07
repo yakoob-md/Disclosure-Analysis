@@ -61,23 +61,32 @@ df = df[df['month_index'].between(0, 35)]
 all_nodes = set(df['sender_canonical'].dropna().unique())
 print(f"Total unique senders: {len(all_nodes)}")
 
-# Build one graph per month
+# Build monthly graphs (batched edge addition — NOT iterrows per email)
 monthly_graphs = {}
-for month in range(36):
-    month_df = df[df['month_index'] == month]
+for month in tqdm(range(36), desc='Building monthly graphs'):
+    month_df = df[df['month_index'] == month][['sender_canonical','recipients']].dropna(subset=['sender_canonical'])
     G = nx.DiGraph()
-    G.add_nodes_from(all_nodes)  # Ensure all nodes present even if no emails
+    G.add_nodes_from(all_nodes)
+    
+    if len(month_df) == 0:
+        monthly_graphs[month] = G
+        continue
+    
+    # Collect all edges as a list, then add in batch
+    from collections import Counter
+    edge_list = []
     for _, row in month_df.iterrows():
         sender = row['sender_canonical']
-        if not isinstance(sender, str): continue
         recips_str = str(row.get('recipients', ''))
         for recip in recips_str.split(';')[:20]:
             recip = recip.strip()
-            if not recip or recip == 'nan': continue
-            if G.has_edge(sender, recip):
-                G[sender][recip]['weight'] += 1
-            else:
-                G.add_edge(sender, recip, weight=1)
+            if recip and recip != 'nan':
+                edge_list.append((sender, recip))
+    
+    edge_counts = Counter(edge_list)
+    for (u, v), w in edge_counts.items():
+        G.add_edge(u, v, weight=w)
+    
     monthly_graphs[month] = G
     if month % 6 == 0:
         print(f"Month {month}: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
@@ -226,22 +235,24 @@ plt.savefig('graphs/betweenness_trajectories.png', dpi=150, bbox_inches='tight')
 print("Saved trajectory plot")
 
 STEP 7 — Statistical validation (Wilcoxon test):
-# Test: is Δ_betweenness significantly larger in crisis months vs stable months?
-# Crisis months: 18-23 (Jul 2001 - Dec 2001)
-# Stable months: 0-17 (Jan 2000 - Jun 2001)
+# Test: is |Δ_betweenness| significantly larger in crisis months vs stable months?
+# Crisis months: 18-23 (Jul 2001 - Dec 2001), Stable months: 0-17
 all_deltas_stable = delta_padded[:, 0:18].flatten()
 all_deltas_crisis = delta_padded[:, 18:24].flatten()
-stat, p_value = wilcoxon(
-    all_deltas_crisis[:len(all_deltas_stable)],
-    all_deltas_stable[:len(all_deltas_crisis)],
-    alternative='greater'
-)
-print(f"\nWilcoxon test — crisis > stable Δ_betweenness:")
-print(f"  Statistic: {stat:.2f}, p-value: {p_value:.4f}")
+
+# Use seeded random sample of equal size (required for Wilcoxon paired test)
+np.random.seed(42)
+n_compare = min(len(all_deltas_stable), len(all_deltas_crisis))
+stable_sample = np.random.choice(all_deltas_stable, size=n_compare, replace=False)
+crisis_sample = np.random.choice(all_deltas_crisis, size=n_compare, replace=False)
+
+stat, p_value = wilcoxon(crisis_sample, stable_sample, alternative='greater')
+print(f"\nWilcoxon test — crisis > stable |\u0394_betweenness|:")
+print(f"  n_compare={n_compare}, Statistic: {stat:.2f}, p-value: {p_value:.4f}")
 if p_value < 0.05:
-    print("  SIGNIFICANT — KG temporal contribution confirmed")
+    print("  SIGNIFICANT — temporal KG signal confirmed (paper claim holds)")
 else:
-    print("  NOT SIGNIFICANT — review centrality computation")
+    print("  NOT SIGNIFICANT — review centrality computation or crisis month boundaries")
 
 print("PHASE 6 COMPLETE")
 === END OF PROMPT ===
@@ -348,8 +359,9 @@ for feat_name, X_tr, X_va, X_te in [
             learning_rate=0.1,
             subsample=0.8,
             colsample_bytree=0.8,
-            use_label_encoder=False,
+            # use_label_encoder removed — deprecated and removed in XGBoost 2.x
             eval_metric='mlogloss',
+            early_stopping_rounds=20,   # moved to constructor — required in XGBoost 2.x
             random_state=42,
             n_jobs=-1
         )
@@ -357,8 +369,8 @@ for feat_name, X_tr, X_va, X_te in [
             X_tr, y_tr,
             sample_weight=sample_weights,
             eval_set=[(X_va, y_va)],
-            verbose=False,
-            early_stopping_rounds=20
+            verbose=False
+            # early_stopping_rounds removed from fit() — must be in constructor for XGBoost 2.x
         )
         
         y_pred = model.predict(X_te)
@@ -719,15 +731,15 @@ class DisclosureDataset(Dataset):
     
     def __len__(self): return len(self.y_type)
     def __getitem__(self, i):
-        return {
+        # Safe token_type_ids access — DeBERTa-v3 does not use them
+        item = {
             'input_ids':      self.encodings['input_ids'][i],
             'attention_mask': self.encodings['attention_mask'][i],
-            'token_type_ids': self.encodings.get('token_type_ids', {i: torch.zeros(256, dtype=torch.long)})[i]
-                              if 'token_type_ids' in self.encodings else torch.zeros(256, dtype=torch.long),
             'phi_g':          self.phi_g[i],
             'y_type':         torch.tensor(self.y_type[i],  dtype=torch.long),
             'y_frame':        torch.tensor(self.y_frame[i], dtype=torch.long),
         }
+        return item
 
 STEP 2 — Model Architecture:
 class OrgDiscloseModel(nn.Module):
@@ -754,11 +766,11 @@ class OrgDiscloseModel(nn.Module):
             nn.Linear(128, num_frame)
         )
     
-    def forward(self, input_ids, attention_mask, token_type_ids, phi_g):
+    def forward(self, input_ids, attention_mask, phi_g):
+        # token_type_ids NOT passed — DeBERTa-v3-small uses SentencePiece and does NOT support them
         out = self.deberta(
             input_ids=input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids
+            attention_mask=attention_mask
         )
         cls_emb = out.last_hidden_state[:, 0, :]   # [CLS] token: R^768
         kg_emb  = self.kg_proj(phi_g)               # R^64

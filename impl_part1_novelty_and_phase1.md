@@ -107,12 +107,13 @@ lightgbm==4.1.0
 imbalanced-learn==0.11.0
 neo4j==5.14.0
 bert-score==0.3.13
-bitsandbytes==0.41.3
+bitsandbytes==0.43.1       # 0.41.3 had poor Windows/CUDA 12 support
 accelerate==0.25.0
 peft==0.7.1
 empath==0.89
 scipy==1.11.4
 tqdm==4.66.1
+pyarrow==14.0.1            # REQUIRED for parquet read/write on Windows
 
 TASK 2: Create setup script `phase1_setup.py` that:
 1. Creates directory structure:

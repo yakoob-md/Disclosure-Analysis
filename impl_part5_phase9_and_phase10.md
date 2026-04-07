@@ -55,11 +55,20 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 model.eval()
 
-STEP 2 — Load 200 test emails:
+STEP 2 — Load 200 test emails (fixed random sample for comparability):
 gold = pd.read_parquet('data/labeled/emails_labeled_gold.parquet')
 test_meta = pd.read_parquet('data/features/split_test.parquet')
-test_df = gold[gold['mid'].isin(test_meta['mid'])].head(200).reset_index(drop=True)
+test_full = gold[gold['mid'].isin(test_meta['mid'])].reset_index(drop=True)
+
+# Use seeded random sample — NOT .head() which is time-ordered and unrepresentative
+test_df = test_full.sample(n=min(200, len(test_full)), random_state=42).reset_index(drop=True)
 print(f"Evaluating LLM on {len(test_df)} test emails")
+
+# Save the exact mids used for reproducibility verification
+import json
+with open('results/llm_test_mids.json', 'w') as f:
+    json.dump(test_df['mid'].tolist(), f)
+print("Saved LLM test email IDs to results/llm_test_mids.json")
 
 STEP 3 — Define 3 prompt templates:
 # 1. ZERO-SHOT PROMPT
@@ -120,7 +129,8 @@ def run_inference(prompt, max_new_tokens=200):
     with torch.no_grad():
         output = model.generate(
             **inputs, max_new_tokens=max_new_tokens,
-            temperature=0.01, do_sample=False,
+            do_sample=False,          # greedy decoding — deterministic
+            # temperature removed: ignored when do_sample=False
             pad_token_id=tokenizer.eos_token_id
         )
     return tokenizer.decode(output[0][inputs['input_ids'].shape[1]:],
@@ -282,9 +292,23 @@ with open('results/llm_results.json') as f:   llm_res = json.load(f)
 # Master table rows — (model_name, disc_type_f1, framing_f1, risk_f1, avg_f1, has_kg)
 rows = []
 
-# Random baseline
-rows.append({'Model': 'Random Baseline', 'disc_type': 0.167, 'framing': 0.333,
-             'risk': 0.333, 'avg': 0.278, 'KG': 'No', 'Tier': 'Baseline'})
+# Compute random baseline from DummyClassifier (not hardcoded — Enron is imbalanced)
+from sklearn.dummy import DummyClassifier
+from sklearn.metrics import f1_score as sk_f1
+y_test_type  = np.load('data/features/y_test_type.npy')
+y_train_type = np.load('data/features/y_train_type.npy')
+y_test_frame = np.load('data/features/y_test_framing.npy')
+y_test_risk  = np.load('data/features/y_test_risk.npy')
+dummy = DummyClassifier(strategy='stratified', random_state=42)
+dummy.fit(np.zeros((len(y_train_type),1)), y_train_type)
+random_f1_type  = sk_f1(y_test_type,  dummy.predict(np.zeros((len(y_test_type),1))),  average='macro')
+random_f1_frame = sk_f1(y_test_frame, dummy.predict(np.zeros((len(y_test_frame),1))), average='macro')
+random_f1_risk  = sk_f1(y_test_risk,  dummy.predict(np.zeros((len(y_test_risk),1))),  average='macro')
+random_avg = (random_f1_type + random_f1_frame + random_f1_risk) / 3
+print(f"Random baseline — type={random_f1_type:.4f}, frame={random_f1_frame:.4f}, risk={random_f1_risk:.4f}")
+rows.append({'Model': 'Random Baseline', 'disc_type': random_f1_type,
+             'framing': random_f1_frame, 'risk': random_f1_risk,
+             'avg': random_avg, 'KG': 'No', 'Tier': 'Baseline'})
 
 # ML models (extract from ml_res structure)
 for model_key, tier in [('xgboost','ML'), ('random_forest','ML')]:
@@ -363,18 +387,34 @@ for model_base in ['XGBoost', 'Random Forest', 'BiLSTM+Attn', 'DeBERTa-v3-small'
 ablation_df = pd.DataFrame(ablation_rows)
 ablation_df.to_csv('results/ablation_table.csv', index=False)
 
-STEP 3 — Wilcoxon signed-rank test (statistical significance):
-# NOTE: For Wilcoxon, you need per-sample F1 scores, not aggregate.
-# Run the best 2 models again on the test set and collect per-sample predictions,
-# Then compute Wilcoxon on per-sample correctness.
+STEP 3 — Wilcoxon signed-rank test (actual implementation):
+# Load per-sample correct/wrong arrays saved during Phase 8B test evaluation
+# These files must be saved from Phase 8B:
+#   np.save('results/deberta_kg_per_sample_correct.npy', np.array(correct_kg))
+#   np.save('results/deberta_text_per_sample_correct.npy', np.array(correct_text))
+# Add this save to Phase 8B after test evaluation:
+#   correct_kg = [1 if p==t else 0 for p,t in zip(all_preds['type'], all_true['type'])]
+#   np.save('results/deberta_kg_per_sample_correct.npy', np.array(correct_kg))
 
-print("\n=== STATISTICAL SIGNIFICANCE ===")
-print("NOTE: Run Wilcoxon on per-sample scores from saved model predictions.")
-print("Load saved prediction arrays from models/deberta_kg_best/ and compute:")
-print("  from scipy.stats import wilcoxon")
-print("  # y_pred_deberta_kg vs y_pred_deberta_text (per-sample binary correct/wrong)")
-print("  stat, p = wilcoxon(correct_kg, correct_text, alternative='greater')")
-print("  Expected: p < 0.05 for top model vs second best")
+import os
+wilcoxon_done = False
+if os.path.exists('results/deberta_kg_per_sample_correct.npy') and \
+   os.path.exists('results/deberta_text_per_sample_correct.npy'):
+    c_kg   = np.load('results/deberta_kg_per_sample_correct.npy')
+    c_text = np.load('results/deberta_text_per_sample_correct.npy')
+    # Wilcoxon requires the arrays to differ — if identical, test will error
+    if not np.array_equal(c_kg, c_text):
+        from scipy.stats import wilcoxon
+        stat, p = wilcoxon(c_kg, c_text, alternative='greater')
+        print(f"Wilcoxon DeBERTa+KG > DeBERTa-text-only:")
+        print(f"  stat={stat:.2f}, p={p:.4f} {'[SIGNIFICANT]' if p<0.05 else '[NOT SIGNIFICANT]'}")
+        wilcoxon_done = True
+if not wilcoxon_done:
+    print("NOTE: Per-sample prediction files not found or identical.")
+    print("  Ensure Phase 8B saves: results/deberta_{kg,text}_per_sample_correct.npy")
+    print("  Add after test evaluation loop in Phase 8B:")
+    print("    correct = [1 if p==t else 0 for p,t in zip(all_preds['type'], all_true['type'])]")
+    print("    np.save('results/deberta_kg_per_sample_correct.npy', np.array(correct))")
 
 STEP 4 — Confusion matrices for disc_type (best model):
 # Run best model predictions and plot confusion matrices

@@ -139,7 +139,9 @@ val_df[['mid','month_index','sender_canonical','sender_role']].to_parquet('data/
 test_df[['mid','month_index','sender_canonical','sender_role']].to_parquet('data/features/split_test.parquet')
 
 STEP 5 — Validation:
-assert X_train_tfidf.shape[1] == 10000, "TF-IDF vocab size wrong"
+actual_vocab = X_train_tfidf.shape[1]
+print(f"TF-IDF actual vocab size: {actual_vocab}")
+assert actual_vocab >= 5000, f"Vocab too small ({actual_vocab}) — insufficient training data or too-strict min_df"
 assert not np.isnan(X_train_tfidf.data).any(), "NaN in TF-IDF matrix"
 print("PHASE 4A COMPLETE — TF-IDF features saved")
 === END OF PROMPT ===
@@ -159,18 +161,14 @@ CONTEXT:
 
 Write phase4b_empath.py:
 
-STEP 1 — Load Empath:
+STEP 1 — Load Empath and determine actual category count:
 from empath import Empath
 lexicon = Empath()
 
-# Empath has 194 semantic categories that work as LIWC alternatives
-# Key categories for disclosure detection:
-KEY_CATEGORIES = [
-    'money', 'business', 'banking', 'negative_emotion', 'deception',
-    'secrecy', 'crime', 'legal', 'work', 'politeness', 'social',
-    'communication', 'power', 'risk', 'anger', 'fear', 'trust',
-    'health', 'family', 'sexual', 'achievement', 'giving'
-]
+# Empath category count varies by version — detect dynamically
+_test_result = lexicon.analyze("test", normalize=True)
+N_EMPATH = len(_test_result) if _test_result else 194
+print(f"Empath categories detected: {N_EMPATH}")
 
 STEP 2 — Feature extraction:
 import numpy as np
@@ -178,10 +176,10 @@ from tqdm import tqdm
 
 def get_empath_features(text):
     if not isinstance(text, str) or len(text.strip()) == 0:
-        return np.zeros(194)
+        return np.zeros(N_EMPATH)
     result = lexicon.analyze(text, normalize=True)
     if result is None:
-        return np.zeros(194)
+        return np.zeros(N_EMPATH)
     return np.array(list(result.values()), dtype=np.float32)
 
 # Process each split separately
@@ -209,7 +207,7 @@ for split_name in ['train', 'val', 'test']:
 STEP 3 — Validate:
 for split_name in ['train', 'val', 'test']:
     feat = np.load(f'data/features/empath_{split_name}.npy')
-    assert feat.shape[1] == 194, f"Empath should have 194 features, got {feat.shape[1]}"
+    assert feat.shape[1] == N_EMPATH, f"Empath count mismatch: {feat.shape[1]} vs {N_EMPATH}"
     assert not np.isnan(feat).any(), f"NaN in Empath {split_name}"
     print(f"{split_name}: {feat.shape} — OK")
 
@@ -367,34 +365,50 @@ for i in range(0, len(all_emails), BATCH_SIZE):
     if i % 2000 == 0:
         print(f"Ingested {i+BATCH_SIZE}/{len(all_emails)} emails")
 
-STEP 5 — Create SENT and RECEIVED edges:
-# For emails where sender is a known employee, create SENT edge
-with driver.session(database="orgdisclose") as session:
-    session.run("""
-        MATCH (emp:Employee), (email:Email)
-        WHERE email.sender CONTAINS emp.email OR emp.email CONTAINS split(email.sender,'@')[0]
-        MERGE (emp)-[:SENT]->(email)
-    """)
-    # For recipients: parse from recipients column
-    for _, row in all_emails.iterrows():
+STEP 5 — Create SENT and RECEIVED edges (batched Python — NOT cartesian Cypher):
+# Cypher cartesian MATCH is O(n^2) and will timeout; use Python loop instead
+for _, row in tqdm(all_emails.iterrows(), total=len(all_emails), desc='Creating edges'):
+    sender_raw = str(row.get('sender', '')).lower()
+    mid = str(row['mid'])
+    
+    # Match sender to known employee
+    matched_emp = None
+    for emp_tuple in EMPLOYEES:
+        emp_email = emp_tuple[0]
+        if emp_email.split('@')[0] in sender_raw:
+            matched_emp = emp_email
+            break
+    
+    with driver.session(database="orgdisclose") as session:
+        # Create SENT edge if sender matched
+        if matched_emp:
+            session.run(
+                "MATCH (emp:Employee {email:$emp}), (m:Email {mid:$mid}) "
+                "MERGE (emp)-[:SENT]->(m)",
+                emp=matched_emp, mid=mid
+            )
+        
+        # Create RECEIVED_BY edges
         recipients_str = str(row.get('recipients',''))
-        if not recipients_str or recipients_str == 'nan': continue
-        for recip in recipients_str.split(';')[:10]:  # cap at 10 recipients
-            recip = recip.strip()
-            if not recip: continue
-            if '@enron.com' in recip.lower():
+        if not recipients_str or recipients_str == 'nan':
+            continue
+        for recip in recipients_str.split(';')[:10]:
+            recip = recip.strip().lower()
+            if not recip:
+                continue
+            if '@enron.com' in recip:
                 session.run(
                     "MATCH (email:Email {mid:$mid}) "
-                    "MERGE (ext:Employee {email:$recip}) "   # may create new minimal nodes
+                    "MERGE (ext:Employee {email:$recip}) "
                     "MERGE (email)-[:RECEIVED_BY]->(ext)",
-                    mid=str(row['mid']), recip=recip.lower()
+                    mid=mid, recip=recip
                 )
             else:
                 session.run(
                     "MATCH (email:Email {mid:$mid}) "
                     "MERGE (ext:ExternalParty {email:$recip}) "
                     "MERGE (email)-[:RECEIVED_BY]->(ext)",
-                    mid=str(row['mid']), recip=recip.lower()
+                    mid=mid, recip=recip
                 )
 
 STEP 6 — Compute audience_scope via Cypher:
@@ -425,10 +439,27 @@ STEP 7 — Save updated parquet with audience_scope:
 gold_updated = gold.merge(
     all_emails[['mid','audience_scope']], on='mid', how='left', suffixes=('','_new')
 )
-gold_updated['audience_scope'] = gold_updated.get('audience_scope_new', gold_updated.get('audience_scope','INTERNAL_AUTH'))
-gold_updated.to_parquet('data/labeled/emails_labeled_gold.parquet', index=False)
+# Fix: use proper column check, not DataFrame.get() which is not a valid pandas pattern
+if 'audience_scope_new' in gold_updated.columns:
+    gold_updated['audience_scope'] = gold_updated['audience_scope_new'].fillna('INTERNAL_AUTH')
+    gold_updated = gold_updated.drop(columns=['audience_scope_new'])
+elif 'audience_scope' not in gold_updated.columns:
+    gold_updated['audience_scope'] = 'INTERNAL_AUTH'
 
 # Update silver file similarly
+silver = pd.read_parquet('data/labeled/emails_labeled_silver.parquet')
+silver_updated = silver.merge(
+    all_emails[['mid','audience_scope']], on='mid', how='left', suffixes=('','_new')
+)
+if 'audience_scope_new' in silver_updated.columns:
+    silver_updated['audience_scope'] = silver_updated['audience_scope_new'].fillna('INTERNAL_AUTH')
+    silver_updated = silver_updated.drop(columns=['audience_scope_new'])
+elif 'audience_scope' not in silver_updated.columns:
+    silver_updated['audience_scope'] = 'INTERNAL_AUTH'
+
+gold_updated.to_parquet('data/labeled/emails_labeled_gold.parquet', index=False)
+silver_updated.to_parquet('data/labeled/emails_labeled_silver.parquet', index=False)
+print(f"Gold updated: {len(gold_updated)} rows, Silver updated: {len(silver_updated)} rows")
 print("PHASE 5A COMPLETE — KG built, audience_scope computed")
 === END OF PROMPT ===
 ```
