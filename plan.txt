@@ -1,0 +1,401 @@
+Phase 1: Data Preparation
+Tasks:
+
+Download CMU Enron dataset SQL version (Shetty & Adibi schema)
+Load into PostgreSQL locally: psql -U postgres -f enron.sql
+Deduplicate: SELECT DISTINCT ON (sender, date, SUBSTRING(body, 1, 200)) — MD5 hash dedup preserves forwarded copies
+Alias resolution: build alias_map.csv using rapidfuzz.process.extractOne on email prefixes against canonical employee list; threshold = 85
+Parse headers with Python email library; extract From, To, CC, BCC, Date, Subject, Body into a clean dataframe
+Normalize timestamps to UTC using pytz; add month_index column (0 = Jan 2000)
+Filter: remove auto-generated system emails (sender domain ≠ @enron.com, @ect.enron.com, etc.)
+Strip quoted reply text: regex r'^(>|From:|Original Message).*$' multiline
+Tools: PostgreSQL, Python (pandas, email, pytz, rapidfuzz, hashlib)
+
+Input: Raw Enron SQL dump (~500k emails)
+
+Output: emails_clean.parquet — ~250k emails with resolved aliases, UTC timestamps, clean body text
+
+Challenges: Alias resolution mismatches for non-Enron addresses; partial quoted text removal
+
+Success Criteria: < 5% alias resolution failures; deduplication reduces corpus by 20–35% (expected range from literature)
+
+Phase 2: Labeling Strategy
+Tasks:
+
+Define annotation guide (2–3 pages): one page per dimension with 5 positive + 5 negative examples each
+Sample 500 emails: stratified by sender role (CEO/VP/Director/Analyst), time period (pre-crisis/crisis), and thread type (single/reply/forward)
+GPT-4 labeling: structured JSON prompt, temperature=0, seed=42, model version pinned; store raw API response
+Human annotation: yourself + one peer, independently annotate 150/500 emails
+Compute Cohen's Kappa per dimension using sklearn.metrics.cohen_kappa_score
+Hard gate: if κ < 0.6 on any dimension, revise annotation guide for that dimension and re-annotate
+Use GPT-4 labels for remaining corpus; 500-email human-validated set = test split
+Tools: OpenAI API (openai >= 1.0), sklearn, Google Sheets (for annotation coordination)
+
+Input: emails_clean.parquet, annotation guide
+
+Output: emails_labeled.parquet with columns: [email_id, body, sender_id, recipients, timestamp, month_index, y_type, y_intent, y_audience, y_risk, label_source]
+
+Challenges: GPT-4 rate limits (~60k tokens/min on Tier 1); κ failures requiring taxonomy revision
+
+Success Criteria: κ ≥ 0.6 on all 4 dimensions; label distribution: no class < 5% of corpus (handle via stratified sampling if needed)
+
+GPT-4 Prompt Template:
+
+python
+SYSTEM = """You are an expert in organizational communication risk analysis.
+Label the following email along 4 dimensions. Respond ONLY in valid JSON.
+Dimensions:
+- info_type: one of [FIN, PII, STR, REL, NONE]
+  FIN=financial data, PII=personal identifiers, STR=strategic/competitive, REL=interpersonal/relational, NONE=no sensitive content
+- intentionality: one of [DELIBERATE, INADVERTENT, NONE]
+  DELIBERATE=sender aware of sensitivity, INADVERTENT=no protective framing, NONE=not applicable
+- audience: one of [APPROPRIATE, INAPPROPRIATE]
+  APPROPRIATE=recipients are authorized, INAPPROPRIATE=cross-hierarchy or external leakage
+- risk: one of [LOW, MEDIUM, HIGH]
+JSON format: {"info_type": "...", "intentionality": "...", "audience": "...", "risk": "..."}"""
+Phase 3: Baseline Modeling (N-grams, TF-IDF, ML)
+Tasks:
+
+Feature extraction: TfidfVectorizer(ngram_range=(1,3), max_features=10000, sublinear_tf=True)
+Add LIWC-equivalent features: compute 22 psycholinguistic categories using empath library (open-source LIWC alternative)
+Add sender centrality features (from Phase 7) as additional columns
+Train per-dimension: Logistic Regression, Random Forest, XGBoost — each as a separate classifier
+Class imbalance: SMOTE via imblearn.over_sampling.SMOTE applied to training set only
+Hyperparameter tuning: GridSearchCV with 5-fold cross-validation on training split
+Tools: sklearn, xgboost, imblearn, empath
+
+Input: emails_labeled.parquet, centrality features from Phase 7
+
+Output: Trained model artifacts + classification reports per dimension
+
+Success Criteria: Macro-F1 > 0.55 on all 4 dimensions (random baseline ≈ 0.25); this is your floor — if you can't beat 0.55 with TF-IDF, your labels are noisy
+
+Phase 4: Deep Learning Models (LSTM, BERT)
+Tasks:
+
+LSTM:
+
+Tokenize using torchtext vocab built on training corpus; pad to max length 512
+Use pretrained gensim Word2Vec (300d, trained on Google News) for embeddings
+Architecture: Embedding(300) → BiLSTM(256) → Dropout(0.3) → 4 independent linear heads
+Training: Adam(lr=1e-3), BCEWithLogitsLoss per head, batch=64, epochs=10
+BERT:
+
+BertForSequenceClassification from HuggingFace with num_labels=1 per head (multi-task = 4 separate heads sharing backbone)
+Fine-tune: AdamW(lr=2e-5, weight_decay=0.01), 3 epochs, batch=16, linear_schedule_with_warmup
+Graph feature integration: project R^8 → R^128 via 2-layer MLP, concatenate with [CLS] → R^896 → 4 heads
+Mixed precision: torch.cuda.amp.autocast() — reduces VRAM significantly for your RTX 2050
+Tools: transformers, torch, torchtext, gensim
+
+Success Criteria: BERT macro-F1 > TF-IDF baseline on all 4 dimensions; graph-augmented BERT > text-only BERT (ablation)
+
+Phase 5: LLM-based Classification
+Tasks:
+
+Zero-shot: pass email body + structured system prompt → parse JSON response
+Few-shot (5 examples): retrieve 5 nearest annotated examples per test email using cosine similarity on sentence-transformers/all-MiniLM-L6-v2 embeddings
+Chain-of-thought: add "Think step by step before labeling." + require reasoning field in JSON
+Consistency test: run each prompt variant 3 times with temperature=0 on 100 test emails → measure self-consistency score
+Compute same macro-F1 metrics as other models
+Tools: OpenAI API, sentence-transformers, faiss (for fast nearest-neighbor retrieval)
+
+Success Criteria: Few-shot F1 > zero-shot F1; consistency score > 95% across 3 runs at temperature=0
+
+Phase 6: Knowledge Graph Construction
+Tasks:
+
+Run spacy en_core_web_trf NER on email bodies; extract PERSON, ORG, MONEY, DATE entities
+Relationship extraction: use REBEL model (HuggingFace) for triple extraction from sentences
+Topic classification: GPT-4 zero-shot per email → 7 topics: {Energy Trading, Legal/Regulatory, Finance/Accounting, Operations, HR/Personnel, External Relations, Social/Personal}
+Ingest to Neo4j:
+Nodes: Employee, Email, Topic, Entity, ExternalParty
+Edges: SENT, RECEIVED, CC_RECEIVED, MENTIONS, CLASSIFIED_AS, REPORTS_TO, WORKS_IN, DISCLOSES_TO_EXTERNAL
+Add disclosure_label property to Email nodes from Phase 2 labels
+Validate graph: check node counts, edge counts, connectivity — run MATCH (n) RETURN labels(n), count(n) in Cypher
+Tools: spacy, REBEL (HuggingFace), neo4j-driver, Neo4j Desktop 5.x
+
+Input: emails_labeled.parquet, org chart
+
+Output: Populated Neo4j graph database
+
+Success Criteria: Graph contains all 150 core employees as nodes; ≥ 90% of labeled emails ingested as Email nodes with all edges populated
+
+Phase 7: Network Analysis (Centrality Metrics)
+Tasks:
+
+Export monthly email graphs using NetworkX: G_t = DiGraph() for each month_index t
+For each G_t, compute:
+nx.degree_centrality(G_t) → in-degree and out-degree separately
+nx.betweenness_centrality(G_t, normalized=True)
+nx.closeness_centrality(G_t)
+Store as centrality_matrix.parquet: shape (n_employees × 24_months × 4_metrics)
+Compute first derivatives: Δ_betweenness[t] = betweenness[t] - betweenness[t-1]
+Normalize: Z-score per metric per month (prevents volume effects from dominating)
+For each email: attach sender's centrality vector at email's month_index → phi_G ∈ R^8
+Plot temporal trajectories for top 10 employees (by total email volume); annotate Aug 14, 2001 inflection point
+Tools: networkx, matplotlib, pandas
+
+Output: centrality_matrix.parquet, phi_G column added to emails_labeled.parquet, trajectory plots (PDF)
+
+Success Criteria: Betweenness distribution shows clear stratification by role; visible behavioral change in centrality trajectories post-Aug 2001 for senior executives
+
+Phase 8: Integration (KG + NLP Outputs)
+Tasks:
+
+Feature fusion: for BERT model, project phi_G ∈ R^8 → R^128 (MLP), concat with [CLS] ∈ R^768 → R^896
+For ML models: directly append phi_G to TF-IDF sparse matrix after normalization
+Run KG-augmented vs. text-only versions of ALL models (ablation study)
+GraphRAG explanation pipeline (for Direction C):
+Given high-risk email, extract sender node from KG
+Run Cypher path query: find shortest path to external recipients
+Pass path + centrality trajectory + email body to GPT-4 for explanation generation
+Store explanation in Email node as explanation property
+Cypher query for explanation:
+
+cypher
+MATCH path = (sender:Employee {id: $sender_id})-[:SENT]->(e:Email {id: $email_id})-[:RECEIVED]->(r)
+WHERE r:ExternalParty
+RETURN path, length(path), relationships(path)
+Success Criteria: KG-augmented BERT outperforms text-only BERT by ≥ 2% macro-F1 on at least 2 of 4 dimensions (this is the publishable KG contribution threshold)
+
+Phase 9: Evaluation & Comparison
+Tasks:
+
+Per-label: Precision, Recall, F1 (macro and weighted) for all models, all 4 dimensions
+Statistical significance: scipy.stats.wilcoxon on per-sample F1 scores between best model pairs
+Ablation table: text-only vs. graph-augmented for each model family
+Confusion matrices per dimension (heatmaps with seaborn)
+Error analysis: manually examine top 50 false negatives from best model — document in a table with email_id, predicted_label, true_label, analysis_note
+McNemar's test between BERT and LLM predictions on shared test set (checks if errors are correlated)
+Tools: sklearn.metrics, scipy.stats, seaborn, matplotlib
+
+Success Criteria: BERT + KG achieves highest macro-F1; Wilcoxon p < 0.05 confirming significance; error analysis reveals systematic failure modes (not random noise)
+
+Phase 10: Insight Extraction & Reporting
+Tasks:
+
+Temporal drift analysis: plot betweenness trajectories; fit linear regression to pre-crisis period; measure deviation post-Aug 2001
+Role-appropriateness heatmap: for each (sender_role, disclosure_type) pair, compute % INAPPROPRIATE — visualize as a matrix
+Cross-silo path analysis: run Cypher to find multi-hop paths from senior executives → external parties through broker nodes; rank by path count × avg_risk_score
+LLM explanation quality: evaluate 50 explanations for faithfulness using RAGAS faithfulness metric — requires ragas library
+Write up: methodology section (2 days), results section (3 days), discussion (1 day)
+Tools: ragas, matplotlib, neo4j-driver, Neo4j Browser (for screenshots)
+
+4. FEATURE-BY-FEATURE BREAKDOWN
+Component	What to Implement	Why Needed	Contribution
+N-gram TF-IDF	Unigrams + bigrams + trigrams, 10k vocab, sublinear TF	Establishes the non-neural text floor; all DL gains must beat this	Baseline anchor for ablation
+LIWC/Empath	22 psycholinguistic categories (affect, certainty, hedging)	Pendar (2007) shows these are strong deception signals; deliberateness dimension depends on hedging markers	Covers linguistic pragmatics that TF-IDF misses
+ML Models	Logistic Regression, Random Forest, XGBoost with SMOTE	Cover the classical ML tier; RF provides feature importance for interpretability	Comparison tier 1
+LSTM	Bidirectional, Word2Vec embeddings, 4 heads	Sequential structure matters — email tends to front-load key content	Comparison tier 2
+BERT	Fine-tuned BertBase, multi-task 4 heads, graph feature projection	State-of-art contextual embeddings; KG augmentation tested here	Primary model
+LLM	GPT-4, 3 prompting strategies, consistency test	Tests zero/few-shot capability; consistency analysis is novel forensic contribution	Comparison tier 3 + Gap 5
+Knowledge Graph	Neo4j, 5 node types, 8 edge types, monthly snapshots	Provides role hierarchy for audience-appropriateness; centrality trajectories as behavioral features	Structural novelty
+Centrality (static)	Degree in/out, betweenness, closeness per employee	Position signal: who sits at key information bottlenecks	Baseline graph feature
+Centrality (dynamic)	First derivatives Δ_betweenness, rolling 30-day Z-score	Anomaly signal: sudden behavioral change, not just structural position	Primary novel contribution
+5. KNOWLEDGE GRAPH — CONCRETE SPECIFICATION
+Schema
+Nodes:
+  Employee   {id, name, email_canonical, role, department, seniority_level}
+  Email      {id, timestamp, month_index, subject, body_hash,
+              y_type, y_intent, y_audience, y_risk, explanation}
+  Topic      {id, label}   ← 7 categories
+  Entity     {id, text, type: PERSON|ORG|MONEY|DATE}
+  ExternalParty {email, domain}
+Edges:
+  (Employee)-[:SENT]->(Email)
+  (Email)-[:RECEIVED {role: TO|CC|BCC}]->(Employee|ExternalParty)
+  (Email)-[:MENTIONS]->(Entity)
+  (Email)-[:CLASSIFIED_AS]->(Topic)
+  (Employee)-[:REPORTS_TO]->(Employee)
+  (Employee)-[:WORKS_IN]->(Department)
+  (Employee)-[:DISCLOSES_TO_EXTERNAL {count, period, avg_risk}]->(ExternalParty)
+How NLP feeds into KG
+NER output → creates Entity nodes + MENTIONS edges
+Topic classifier output → creates CLASSIFIED_AS edges
+Disclosure labels → properties on Email nodes
+Sender centrality → properties on Employee nodes (updated per month_index)
+How KG is used (not just built)
+Feature source: Centrality properties feed directly into model input vectors
+Audience-appropriateness oracle: Query REPORTS_TO chain to determine if recipient is within sender's authorized disclosure scope
+Anomaly detection rule engine: Cypher alerts on: external recipient + FIN disclosure + HIGH risk + betweenness spike > 2σ
+Explanation substrate: Multi-hop path queries power the GraphRAG explanation pipeline
+6. NETWORK ANALYSIS — HOW METRICS DETECT RISK
+Metric	Computation	What it Detects
+In-degree centrality	# emails received / (n-1)	Information receivers — potential targets of manipulation or excessive information flow
+Out-degree centrality	# emails sent / (n-1)	Information broadcasters — employees spreading information widely; high out-degree + high FIN label = critical risk signal
+Betweenness centrality	Fraction of all-pairs shortest paths passing through node	Broker detection — employees who sit between organizational silos; a sudden betweenness spike indicates a new brokerage role, often preceding disclosure events
+Closeness centrality	Inverse of average shortest path to all other nodes	Information reach — how quickly can this employee's communications spread through the network? High closeness + inappropriate disclosure = network-wide contamination risk
+Δ_betweenness (derivative)	betweenness[t] – betweenness[t-1]	Behavioral anomaly — the single most predictive feature; normal hubs have stable betweenness; criminals cover their tracks by suddenly changing communication patterns
+Detection logic example:
+
+IF Δ_betweenness[sender, t] > 2σ
+AND email.y_type = FIN
+AND email.y_audience = INAPPROPRIATE
+AND recipient ∈ ExternalParty
+THEN risk_score = HIGH (rule-based escalation, regardless of model prediction)
+This rule-based escalation on top of the ML model is itself a publishable contribution — it demonstrates that graph topology carries signal the text classifier cannot capture.
+
+7. NOVELTY DESIGN
+What is Already Common (Do Not Claim as Novel)
+Using BERT for email classification — done in hundreds of papers
+Building a KG from Enron emails — done (AR-BABER, Diesner & Carley)
+Computing static centrality on Enron — done (elmondhir repo, Diesner 2005)
+LLM zero-shot classification — commoditized
+Novel Contribution 1 — Temporal Centrality Derivatives as Behavioral Features
+What is new: Computing monthly centrality on evolving graph snapshots and using the rate of change (first derivative) as an ML feature. No published paper does this for disclosure detection on Enron.
+
+Why it matters: Static centrality says "who you are in the network." The derivative says "how your role is changing." Role change precedes behavioral disclosure — this is the pre-crisis behavioral drift signal.
+
+How to implement:
+
+python
+# For each employee, compute monthly betweenness
+for month in range(24):
+    G_t = build_monthly_graph(emails, month)
+    centrality[employee][month] = nx.betweenness_centrality(G_t)[employee]
+# Compute derivative
+delta = np.diff(centrality[employee])  # shape: (23,)
+# For an email in month t, feature vector phi_G = [
+#   centrality[sender][t], delta[t-1], in_degree[t], out_degree[t], ...
+# ]
+Novel Contribution 2 — Multi-Task Multi-Label Disclosure Taxonomy with Role-Conditioned Audience Scoring
+What is new: The four-dimensional label schema itself — no paper has operationalized "disclosure" as a structured 4-head prediction problem on Enron. The audience-appropriateness dimension is specifically novel because it requires the KG (role hierarchy) to compute ground truth.
+
+Why it matters: This reframes the problem from binary anomaly detection (fraud/not-fraud) to structured risk profiling with actionable dimensions. Each dimension corresponds to a compliance intervention.
+
+How to implement: Define audience ground truth via KG query:
+
+cypher
+MATCH (sender:Employee)-[:REPORTS_TO*1..3]->(exec)
+WITH collect(exec.id) AS authorized_chain
+MATCH (e:Email {id: $email_id})-[:RECEIVED]->(r)
+WHERE NOT r.id IN authorized_chain AND NOT r:Employee
+SET e.y_audience = 'INAPPROPRIATE'
+Novel Contribution 3 — LLM Prompt Consistency as a Forensic Reliability Metric
+What is new: Measuring how stable LLM disclosure classifications are under prompt paraphrase variation — specifically in a forensic context where instability = legal inadmissibility.
+
+Why it matters: This is Gap 5 in the Gemini doc and has never been studied. Papers that use LLMs for classification never ask "would this verdict change if the question was phrased differently?" In forensic NLP, this is the critical validity question.
+
+How to implement:
+
+python
+prompt_variants = [
+    "Classify this email for disclosure risk.",
+    "Analyze whether this email inappropriately discloses sensitive information.",
+    "Label the following email according to organizational data leakage criteria.",
+    "Is there any sensitive disclosure in this email?",
+    "From a corporate compliance perspective, flag any disclosure in this email."
+]
+# Run all 5 variants on 100 test emails
+# Compute: agreement_rate = % emails with same label across all 5 variants
+# Report per dimension — this is your forensic reliability score
+8. MODEL COMPARISON DESIGN
+Setup (Identical Across All Models)
+Same split: Train Jan 2000 – Jul 2001 | Val Aug–Sep 2001 | Test Oct–Dec 2001
+Same labels: 4-dimensional output from Phase 2 (GPT-4 labeled, human validated on test set)
+Same test set: 500 human-annotated emails — ALL models evaluated on this set
+Same metrics: Macro-F1, Precision, Recall per dimension; Wilcoxon p-values for model pairs
+Same feature inputs: Text-only variant and KG-augmented variant for all models
+Comparison Table Format
+Model	y_type F1	y_intent F1	y_audience F1	y_risk F1	Avg F1	Δ vs. text-only
+TF-IDF + LR						—
+TF-IDF + LR + KG						+X%
+TF-IDF + RF						—
+TF-IDF + RF + KG						+X%
+LSTM						—
+LSTM + KG						+X%
+BERT						—
+BERT + KG						+X%
+GPT-4 Zero-shot						—
+GPT-4 Few-shot						—
+GPT-4 CoT						—
+9. EVALUATION PLAN
+Metrics
+Macro-F1: Primary metric. Weighted equally across all classes — critical because your label distribution will be imbalanced (most emails are LOW risk / NONE type). A model that always predicts NONE would have high accuracy but near-zero macro-F1.
+Per-label F1: Required for multi-label; shows which disclosure types the model struggles with
+Cohen's κ: Required for annotation validity (Phase 2 gate)
+Wilcoxon signed-rank test: Required for any claim of model A > model B. Use scipy.stats.wilcoxon(f1_A, f1_B) on per-sample scores.
+Evaluating KG Usefulness
+The KG contribution must be isolated via ablation:
+
+Ablation 1: Remove graph features from BERT → measure F1 drop
+Ablation 2: Replace dynamic centrality with static centrality → measure F1 drop
+Ablation 3: Remove role-hierarchy query from audience label computation → measure κ drop in annotation
+Each ablation is a publishable finding.
+
+Validating Insights (Beyond Predictions)
+Temporal drift curve: Plot betweenness vs. time for top 5 executives. Annotate crisis events. Does the KG show early warning signals?
+Role-appropriateness heatmap: Which roles have the highest % INAPPROPRIATE audience scores? (Expected: Traders > Analysts > Executives — this would be a novel finding)
+RAGAS faithfulness: For GraphRAG explanations, faithfulness_score = % of explanation claims that are directly supported by the KG path
+10. FINAL EXECUTION BLUEPRINT
+End-to-End Data Flow
+Raw Enron SQL (~500k emails)
+    ↓ [Phase 1: Preprocessing]
+emails_clean.parquet (~250k, deduped, alias-resolved)
+    ↓ [Phase 2: Labeling]
+emails_labeled.parquet (4-dim labels, 500 human-annotated test set)
+    ↓ [Split]
+    ├── Train set (Jan 2000 – Jul 2001)
+    ├── Val set (Aug – Sep 2001)
+    └── Test set (Oct – Dec 2001) ← 500 human-annotated
+    ↓ [Phase 3-5: Feature Extraction]
+    ├── TF-IDF matrix (sparse, R^10000)
+    ├── LIWC/Empath features (R^22)
+    ├── BERT [CLS] embeddings (R^768)
+    └── phi_G centrality features (R^8) ← from Phase 7
+    ↓ [Phase 6: KG Construction]
+Neo4j Graph DB (Employee, Email, Topic, Entity nodes + all edges)
+    ↓ [Phase 7: Network Analysis]
+centrality_matrix.parquet (n_employees × 24 months × 4 metrics)
+    ↓ [Phase 8: Integration]
+    ├── text ⊕ phi_G → ML models → predictions + F1
+    ├── BERT([CLS] ⊕ MLP(phi_G)) → BERT+KG → predictions + F1
+    ├── GPT-4 prompt → LLM → predictions + F1
+    └── High-risk emails → KG path query → GPT-4 → explanation + faithfulness
+    ↓ [Phase 9: Evaluation]
+Results table (model × dimension × F1) + Wilcoxon p-values + ablation table
+    ↓ [Phase 10: Insights]
+Temporal drift plots + role-appropriateness heatmap + cross-silo path analysis
+Final Output Deliverables
+emails_labeled.parquet — labeled dataset (shareable as GitHub release)
+centrality_matrix.parquet — temporal centrality features
+model_results.csv — all model comparison results, reproducible
+Neo4j database dump — reproducible KG
+Annotation guide PDF — reproducible labeling schema
+Research paper draft (8–10 pages, double column ACM/IEEE format)
+11. RESEARCH PAPER READINESS
+Current Status: Not Publishable. Publishable with 9–12 weeks of execution.
+The Gemini document is a strong proposal, not a paper. A paper requires results. Here is the exact gap:
+
+Requirement	Gap	Fix
+Novel contribution	Taxonomy defined, not implemented	Annotate 500 emails and release dataset
+Ablation study	Completely absent	Run all model variants with/without KG
+Statistical significance	No numbers at all	Wilcoxon tests on final results
+Temporal analysis	"Mentioned as a gap"	Implement centrality trajectories: 4 hours of code
+Inter-rater agreement	Described, not computed	Annotate + compute κ: 2 weeks
+Error analysis	Absent	2-hour qualitative review of 50 false negatives
+Code release	Absent	GitHub repo minimum for reproducibility
+To Reach IEEE/ACM Level
+Minimum viable paper (IEEE Access, EMNLP Findings):
+
+BERT + KG vs. baselines on 4-dimension taxonomy with Wilcoxon significance
+Temporal centrality derivative as novel feature with ablation showing Δ F1
+Cohen's κ ≥ 0.6 on annotation
+Error analysis paragraph
+Strong paper (IEEE TKDE, ACM CCS):
+
+All of the above +
+GraphRAG explanations with RAGAS faithfulness > 0.75
+Role-appropriateness heatmap showing 3+ significant cross-role patterns
+Reproducible dataset release
+Required Experiments (in priority order)
+Annotate 500 emails, compute κ — Week 1–2, stops everything else if κ < 0.6
+Compute monthly centrality matrices, plot trajectories — Week 2, 4 hours of code
+Run TF-IDF + LR baseline (text-only + KG-augmented) — Week 3, first real results
+Fine-tune BERT (text-only + KG-augmented) — Week 4–5
+Run GPT-4 zero/few-shot/CoT — Week 5, budget ~$20 at current API pricing
+Wilcoxon tests on all model pairs — Week 6, 30 minutes of code
+Error analysis top-50 false negatives — Week 6, 3 hours qualitative work
+The single most important thing to do in the next 48 hours: Set up the annotation environment. Open the Enron SQL database. Sample your 500 emails. Write your annotation guide. Everything else is blocked on labeled data.
+
+The research direction is genuine. The dataset is correct. The gap is unoccupied. What separates you from a published paper is annotated data and numbers from your own experiments — nothing else.

@@ -1,0 +1,206 @@
+You are acting as a senior AI researcher, project architect, and thesis evaluator.
+
+I am working on a research-level NLP project titled:
+
+"Disclosure Analysis in Workplace Communication using Knowledge Graphs, Network Analysis, and Model Comparison (ML, DL, and LLM) on the Enron Email Dataset"
+
+I have already conducted initial research and defined a rough approach attached .
+
+Your task is NOT to repeat or summarize it.
+
+Your task is to:
+
+* Critically refine it
+* Identify gaps and weaknesses
+* Convert it into a precise, execution-ready, phase-wise implementation plan
+* Ensure the project reaches research-paper level novelty
+
+---
+
+🔴 INPUT:
+attached already
+
+---
+
+⚠️ CORE INSTRUCTION:
+Do NOT give generic suggestions.
+Do NOT stay high-level.
+Be extremely specific, technical, and actionable.
+
+---
+
+1. CRITICAL REFINEMENT:
+
+* Identify flaws, missing components, or weak assumptions in the current approach
+* Point out where the design is vague or not research-worthy
+* Suggest concrete improvements
+
+---
+
+2. FINAL PROBLEM FORMULATION:
+
+* Rewrite the problem in a precise, research-grade way
+* Clearly define:
+  → What is “disclosure”
+  → What is being predicted/detected
+  → What is the final output of the system
+
+---
+
+3. PHASE-WISE IMPLEMENTATION PLAN (VERY DETAILED):
+
+Break the entire project into phases:
+
+Phase 1: Data Preparation
+Phase 2: Labeling Strategy
+Phase 3: Baseline Modeling (N-grams, TF-IDF, ML)
+Phase 4: Deep Learning Models (LSTM, BERT)
+Phase 5: LLM-based Classification
+Phase 6: Knowledge Graph Construction
+Phase 7: Network Analysis (centrality metrics)
+Phase 8: Integration (KG + NLP outputs)
+Phase 9: Evaluation & Comparison
+Phase 10: Insight Extraction & Reporting
+
+For EACH phase, provide:
+
+* Exact tasks to perform
+* Tools/libraries to use
+* Input/output format
+* Expected challenges
+* Clear success criteria
+
+---
+
+4. FEATURE-BY-FEATURE BREAKDOWN:
+
+For every major component:
+
+* N-gram baseline
+* ML models
+* DL models
+* LLM
+* Knowledge Graph
+* Network centrality metrics
+
+Explain:
+
+* What exactly to implement
+* Why it is needed
+* How it contributes to the final objective
+
+---
+
+5. KNOWLEDGE GRAPH (HIGH PRIORITY):
+
+Provide a concrete implementation plan:
+
+* Node types
+* Edge types
+* Schema design
+* Storage (Neo4j / NetworkX)
+* How NLP outputs feed into KG
+
+Explain clearly:
+
+* How KG improves disclosure analysis
+* How KG is used (not just built)
+
+---
+
+6. NETWORK ANALYSIS:
+
+Explain how to compute and use:
+
+* Degree centrality
+* Betweenness centrality
+* Closeness centrality
+
+MOST IMPORTANT:
+
+* How these metrics help detect:
+  → manipulation
+  → abnormal behavior
+  → risky communication
+
+---
+
+7. NOVELTY DESIGN (CRITICAL):
+
+Identify:
+
+* What parts of the current approach are already common
+* What needs to be changed to make it UNIQUE
+
+Then propose:
+
+* 2–3 NOVEL contributions that:
+  → are not commonly implemented
+  → are feasible
+  → can be used in a research paper
+
+For each:
+
+* What is new?
+* Why it matters?
+* How to implement it?
+
+---
+
+8. MODEL COMPARISON DESIGN:
+
+Provide a FAIR comparison setup for:
+
+* ML (Logistic Regression, Random Forest)
+* DL (LSTM, BERT)
+* LLM (prompt-based)
+
+Include:
+
+* Same dataset split
+* Same labels
+* Evaluation consistency
+
+---
+
+9. EVALUATION PLAN:
+
+* Metrics: Accuracy, Precision, Recall, F1
+* Why F1 is critical here
+* How to evaluate KG usefulness
+* How to validate insights (not just predictions)
+
+---
+
+10. FINAL EXECUTION BLUEPRINT:
+
+Give a COMPLETE picture:
+
+* End-to-end pipeline (step-by-step)
+* Data flow (text → features → models → KG → analysis)
+* What the final output should look like
+
+---
+
+11. RESEARCH PAPER READINESS:
+
+* Is this project publishable in current form?
+* What must be improved to reach IEEE/ACM level?
+* What experiments/results are required?
+
+---
+
+⚠️ FINAL INSTRUCTION:
+
+Think like a strict research supervisor.
+
+Your goal is NOT to make this easy.
+
+Your goal is to ensure this project:
+
+* is technically strong
+* is clearly structured
+* has real novelty
+* is worthy of a research paper
+
+Push the design to the next level.
