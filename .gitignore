@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv/
+.env/
+.env
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+
+# Data (IMPORTANT)
+data/
+datasets/
+*.csv
+*.json
+
+# Model files
+*.pt
+*.pth
+*.bin
+
+# Node (if frontend)
+node_modules/
+dist/
+build/
