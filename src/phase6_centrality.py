@@ -33,6 +33,10 @@ print("=" * 65)
 # STEP 1 — Build monthly directed graphs
 # ──────────────────────────────────────────────────────────────────────
 print("\n[STEP 1] Building monthly graphs...")
+import sys
+sys.path.append(os.path.abspath('src'))
+from phase2_preprocess import resolve_alias_with_fuzzy
+
 df = pd.read_parquet('data/processed/emails_clean.parquet')
 df = df[df['month_index'].between(0, 35)]
 
@@ -41,6 +45,8 @@ all_nodes = set(df['sender_canonical'].dropna().unique())
 print(f"Total unique senders in corpus: {len(all_nodes)}")
 
 monthly_graphs = {}
+memo_canon = {}  # Cache to prevent slow duplicate rapidfuzz calls
+
 for month in tqdm(range(36), desc='Building monthly graphs'):
     month_df = df[df['month_index'] == month][['sender_canonical','recipients']].dropna(subset=['sender_canonical'])
     G = nx.DiGraph()
@@ -58,7 +64,13 @@ for month in tqdm(range(36), desc='Building monthly graphs'):
         for recip in recips_str.split(';')[:20]:
             recip = recip.strip()
             if recip and recip != 'nan':
-                edge_list.append((sender, recip))
+                if recip not in memo_canon:
+                    memo_canon[recip] = resolve_alias_with_fuzzy(recip)
+                recip_canon = memo_canon[recip]
+                
+                # Only add edge if the target was successfully resolved to a known employee!
+                if recip_canon in all_nodes:
+                    edge_list.append((sender, recip_canon))
     
     edge_counts = Counter(edge_list)
     for (u, v), w in edge_counts.items():

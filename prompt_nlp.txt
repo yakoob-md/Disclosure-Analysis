@@ -1,219 +1,51 @@
-You are acting as:
+# RESEARCH AUDIT REQUEST: Organizational Disclosure Analysis (Enron Case Study)
 
-* A senior AI engineer
-* A research supervisor
-* A systems architect
+**Context:** I am developing a research-grade forensic pipeline to detect sensitive information disclosure in workplace environments. I have implemented up to Phase 6 (Temporal Network Analysis). I need a "Cruel Reviewer" critique of the project's logic and research potential.
 
-Your goal is to help me transition from a working demo pipeline to a full research-level implementation.
+**The Pipeline:** 
+1. **Weak Supervision:** 5,000 emails labeled via Phi-3-Mini (LLM) across 6 disclosure types.
+2. **Feature Engineering:** Vectorization (TF-IDF) + Psycholinguistics (Empath) + Graph Topology (NetworkX).
+3. **Temporal Graph:** 36 monthly network snapshots tracking employee brokerage.
+4. **Validation:** Statistical proof that network centrality "shocks" correlate with organizational crisis events.
 
----
-
-📌 PROJECT CONTEXT:
-
-Project Title:
-"Disclosure Analysis in Workplace Communication using Knowledge Graphs, Network Analysis, and Model Comparison (ML, DL, and LLM) on the Enron Email Dataset"
-
-Current Status:
-
-* I have successfully run a demo pipeline (demo_pipeline.py)
-* It executes in ~1 minute
-* It uses:
-  → keyword-based labeling
-  → TF-IDF + ML models
-  → NetworkX Knowledge Graph
-  → centrality metrics
-
-This demo pipeline is working and produces results.
+**Files Provided:** [ATTACH YOUR FILES HERE]
 
 ---
 
-📂 INPUT FILES:
+### YOUR TASKS:
+
+#### 1. CRITICAL SYSTEM VALIDATION
+- **Data Leakage Check:** Analyze Phase 4A/6. Are graph features being computed using information that would not be available at the time of prediction?
+- **The Bipartite Disconnect Check:** Review the recipient-sender mapping in `phase6_centrality.py`. Does the logic successfully merge raw email addresses into canonical employee nodes? If not, the graph metrics are noise.
+- **Stratification Bias:** Evaluate the 60/40 "Crisis vs. Stable" sampling. Does this introduce a prior bias that makes the model useless for real-time deployment?
+
+#### 2. RESEARCH NOVELTY EVALUATION
+- Compare this with existing NLP literature on the Enron corpus. 
+- Is the integration of "Temporal Centrality" (phi_G) as a feature vector alongside LLM-silver labels a publishable-tier innovation for an NLP/Network Science conference?
+- Critically evaluate the "Risk Tier" logic. Is it a sound derivative or a leap in logic?
+
+#### 3. TECHNICAL CRITIQUE
+- **Graph Validity:** Is 100-sample approximation for betweenness centrality sufficient for a 19k-node graph, or are we sacrificing "The Oracle of the Center"?
+- **LLM Reliability:** Analyzing the prompts provided, identify "Boundary Ambiguity." Where will the LLM most likely fail in distinguishing between "STRATEGIC" and "FINANCIAL" disclosures?
+
+#### 4. ACTIONABLE FORENSIC FEEDBACK
+- Identify the "Hidden Flaw" I haven't seen yet.
+- Suggest 3 concrete improvements to make this "Camera Ready" for a top-tier paper.
+- Provide 2 "Stump the Student" questions for a Viva examination based on the weaknesses you found.
+
+**BE STRICT. BE CRITICAL. ASSUME I AM A POST-DOC SEEKING TRUTH, NOT A STUDENT SEEKING PRAISE.**
+
+
+📁 ORGDISCLOSE_AUDIT_PACKAGE/
+├── 📁 01_Core_Pipeline/
+│   ├── phase2_preprocess.py     # Data cleaning & stratified sampling logic
+│   ├── phase3a_autolabel.py     # LLM Labeling & prompt strategy
+│   └── phase6_centrality.py     # Temporal graph construction (THE CORE)
+├── 📁 02_Logic_Foundations/
+│   ├── validation_report.md     # Previous audit findings and fixes
+│   └── Prompt_Templates.txt     # System prompts for labeling
+└── 📁 03_Results_&_Stats/
+    ├── betweenness.png          # Visual proof of temporal shift
+    ├── statistical_results.txt  # Wilcoxon p-values
+    └── dataset_statistics.txt   # Class balance of silver labels
 
-I am providing:
-
-1. The demo pipeline file
-2. Additional implementation files (for full project)
-3. A review file explaining what is missing
-
----
-
-⚠️ CORE OBJECTIVES:
-
-You must:
-
-1. Separate DEMO vs ACTUAL PROJECT
-2. Validate current results
-3. Upgrade implementation files
-4. Estimate execution time (VERY IMPORTANT)
-5. Provide realistic execution plan
-
----
-
-1. RESULT VALIDATION (VERY IMPORTANT):
-
-* Are the current demo results correct?
-* Are they logically valid or misleading?
-* What is acceptable for presentation?
-* What needs improvement?
-
----
-
-2. PROJECT STRUCTURE REORGANIZATION:
-
-Suggest a clean folder structure:
-
-* demo/
-  → demo_pipeline.py
-  → demo outputs
-
-* research/
-  → actual implementation files
-  → models
-  → KG
-  → evaluation
-
-Explain:
-
-* what goes where
-* what to keep separate
-
----
-
-3. REVIEW OF “WHAT IS LACKING” FILE:
-
-* Analyze the provided review file
-* Identify:
-  → what is actually missing
-  → what is already implemented
-  → what is overcomplicated
-
----
-
-4. IMPLEMENTATION UPGRADES (FILE-WISE):
-
-For EACH implementation file:
-
-* What changes are needed?
-* What should be added/removed?
-* Map each change to:
-  → file name
-  → function/section
-
-Ensure:
-
-* alignment with research objective
-* no unnecessary complexity
-
----
-
-5. TRANSITION FROM DEMO → REAL PROJECT:
-
-Explain clearly:
-
-* What changes from:
-  → keyword labeling → proper labeling
-  → TF-IDF → embeddings
-  → simple KG → structured KG
-  → static analysis → deeper analysis
-
----
-
-6. EXECUTION TIME ESTIMATION (CRITICAL):
-
-Given:
-
-* NVIDIA RTX 2050 GPU
-* moderate dataset size (10k–50k emails)
-
-Estimate:
-
-* ML models → time
-* LSTM → time
-* BERT fine-tuning → time
-* KG construction → time
-* centrality computation → time
-
-Provide:
-
-* realistic ranges (minutes / hours)
-* bottlenecks
-
----
-
-7. REALISTIC EXECUTION PLAN:
-
-Give a step-by-step plan:
-
-Day 1:
-
-* what to run
-
-Day 2:
-
-* what to run
-
-...
-
-Focus on:
-
-* getting research-level results
-* avoiding unnecessary delays
-
----
-
-8. MINIMUM RESEARCH-LEVEL PIPELINE:
-
-Define the simplest pipeline that can still be considered:
-→ research-grade
-
-Include:
-
-* at least one DL model
-* KG integration
-* network metrics
-* proper evaluation
-
----
-
-9. WHAT TO KEEP vs REMOVE:
-
-Clearly state:
-
-KEEP:
-
-* parts that are correct and useful
-
-REMOVE:
-
-* unnecessary or redundant parts
-
----
-
-10. FINAL RECOMMENDATION:
-
-* Is it a good idea to start full project now?
-* Or refine demo first?
-
-Be honest and practical.
-
----
-
-⚠️ FINAL INSTRUCTION:
-
-Be extremely realistic.
-
-Do NOT:
-
-* suggest heavy training without justification
-* assume unlimited compute
-
-Do:
-
-* optimize for RTX 2050
-* prioritize efficiency + correctness
-
-Your goal is to help me:
-
-* not waste time
-* get correct results
-* move toward research-level output
