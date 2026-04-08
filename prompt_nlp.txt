@@ -1,206 +1,219 @@
-You are acting as a senior AI researcher, project architect, and thesis evaluator.
+You are acting as:
 
-I am working on a research-level NLP project titled:
+* A senior AI engineer
+* A research supervisor
+* A systems architect
 
+Your goal is to help me transition from a working demo pipeline to a full research-level implementation.
+
+---
+
+📌 PROJECT CONTEXT:
+
+Project Title:
 "Disclosure Analysis in Workplace Communication using Knowledge Graphs, Network Analysis, and Model Comparison (ML, DL, and LLM) on the Enron Email Dataset"
 
-I have already conducted initial research and defined a rough approach attached .
+Current Status:
 
-Your task is NOT to repeat or summarize it.
+* I have successfully run a demo pipeline (demo_pipeline.py)
+* It executes in ~1 minute
+* It uses:
+  → keyword-based labeling
+  → TF-IDF + ML models
+  → NetworkX Knowledge Graph
+  → centrality metrics
 
-Your task is to:
-
-* Critically refine it
-* Identify gaps and weaknesses
-* Convert it into a precise, execution-ready, phase-wise implementation plan
-* Ensure the project reaches research-paper level novelty
-
----
-
-🔴 INPUT:
-attached already
+This demo pipeline is working and produces results.
 
 ---
 
-⚠️ CORE INSTRUCTION:
-Do NOT give generic suggestions.
-Do NOT stay high-level.
-Be extremely specific, technical, and actionable.
+📂 INPUT FILES:
+
+I am providing:
+
+1. The demo pipeline file
+2. Additional implementation files (for full project)
+3. A review file explaining what is missing
 
 ---
 
-1. CRITICAL REFINEMENT:
+⚠️ CORE OBJECTIVES:
 
-* Identify flaws, missing components, or weak assumptions in the current approach
-* Point out where the design is vague or not research-worthy
-* Suggest concrete improvements
+You must:
 
----
-
-2. FINAL PROBLEM FORMULATION:
-
-* Rewrite the problem in a precise, research-grade way
-* Clearly define:
-  → What is “disclosure”
-  → What is being predicted/detected
-  → What is the final output of the system
+1. Separate DEMO vs ACTUAL PROJECT
+2. Validate current results
+3. Upgrade implementation files
+4. Estimate execution time (VERY IMPORTANT)
+5. Provide realistic execution plan
 
 ---
 
-3. PHASE-WISE IMPLEMENTATION PLAN (VERY DETAILED):
+1. RESULT VALIDATION (VERY IMPORTANT):
 
-Break the entire project into phases:
-
-Phase 1: Data Preparation
-Phase 2: Labeling Strategy
-Phase 3: Baseline Modeling (N-grams, TF-IDF, ML)
-Phase 4: Deep Learning Models (LSTM, BERT)
-Phase 5: LLM-based Classification
-Phase 6: Knowledge Graph Construction
-Phase 7: Network Analysis (centrality metrics)
-Phase 8: Integration (KG + NLP outputs)
-Phase 9: Evaluation & Comparison
-Phase 10: Insight Extraction & Reporting
-
-For EACH phase, provide:
-
-* Exact tasks to perform
-* Tools/libraries to use
-* Input/output format
-* Expected challenges
-* Clear success criteria
+* Are the current demo results correct?
+* Are they logically valid or misleading?
+* What is acceptable for presentation?
+* What needs improvement?
 
 ---
 
-4. FEATURE-BY-FEATURE BREAKDOWN:
+2. PROJECT STRUCTURE REORGANIZATION:
 
-For every major component:
+Suggest a clean folder structure:
 
-* N-gram baseline
-* ML models
-* DL models
-* LLM
-* Knowledge Graph
-* Network centrality metrics
+* demo/
+  → demo_pipeline.py
+  → demo outputs
+
+* research/
+  → actual implementation files
+  → models
+  → KG
+  → evaluation
 
 Explain:
 
-* What exactly to implement
-* Why it is needed
-* How it contributes to the final objective
+* what goes where
+* what to keep separate
 
 ---
 
-5. KNOWLEDGE GRAPH (HIGH PRIORITY):
+3. REVIEW OF “WHAT IS LACKING” FILE:
 
-Provide a concrete implementation plan:
+* Analyze the provided review file
+* Identify:
+  → what is actually missing
+  → what is already implemented
+  → what is overcomplicated
 
-* Node types
-* Edge types
-* Schema design
-* Storage (Neo4j / NetworkX)
-* How NLP outputs feed into KG
+---
+
+4. IMPLEMENTATION UPGRADES (FILE-WISE):
+
+For EACH implementation file:
+
+* What changes are needed?
+* What should be added/removed?
+* Map each change to:
+  → file name
+  → function/section
+
+Ensure:
+
+* alignment with research objective
+* no unnecessary complexity
+
+---
+
+5. TRANSITION FROM DEMO → REAL PROJECT:
 
 Explain clearly:
 
-* How KG improves disclosure analysis
-* How KG is used (not just built)
+* What changes from:
+  → keyword labeling → proper labeling
+  → TF-IDF → embeddings
+  → simple KG → structured KG
+  → static analysis → deeper analysis
 
 ---
 
-6. NETWORK ANALYSIS:
+6. EXECUTION TIME ESTIMATION (CRITICAL):
 
-Explain how to compute and use:
+Given:
 
-* Degree centrality
-* Betweenness centrality
-* Closeness centrality
+* NVIDIA RTX 2050 GPU
+* moderate dataset size (10k–50k emails)
 
-MOST IMPORTANT:
+Estimate:
 
-* How these metrics help detect:
-  → manipulation
-  → abnormal behavior
-  → risky communication
+* ML models → time
+* LSTM → time
+* BERT fine-tuning → time
+* KG construction → time
+* centrality computation → time
 
----
+Provide:
 
-7. NOVELTY DESIGN (CRITICAL):
-
-Identify:
-
-* What parts of the current approach are already common
-* What needs to be changed to make it UNIQUE
-
-Then propose:
-
-* 2–3 NOVEL contributions that:
-  → are not commonly implemented
-  → are feasible
-  → can be used in a research paper
-
-For each:
-
-* What is new?
-* Why it matters?
-* How to implement it?
+* realistic ranges (minutes / hours)
+* bottlenecks
 
 ---
 
-8. MODEL COMPARISON DESIGN:
+7. REALISTIC EXECUTION PLAN:
 
-Provide a FAIR comparison setup for:
+Give a step-by-step plan:
 
-* ML (Logistic Regression, Random Forest)
-* DL (LSTM, BERT)
-* LLM (prompt-based)
+Day 1:
+
+* what to run
+
+Day 2:
+
+* what to run
+
+...
+
+Focus on:
+
+* getting research-level results
+* avoiding unnecessary delays
+
+---
+
+8. MINIMUM RESEARCH-LEVEL PIPELINE:
+
+Define the simplest pipeline that can still be considered:
+→ research-grade
 
 Include:
 
-* Same dataset split
-* Same labels
-* Evaluation consistency
+* at least one DL model
+* KG integration
+* network metrics
+* proper evaluation
 
 ---
 
-9. EVALUATION PLAN:
+9. WHAT TO KEEP vs REMOVE:
 
-* Metrics: Accuracy, Precision, Recall, F1
-* Why F1 is critical here
-* How to evaluate KG usefulness
-* How to validate insights (not just predictions)
+Clearly state:
 
----
+KEEP:
 
-10. FINAL EXECUTION BLUEPRINT:
+* parts that are correct and useful
 
-Give a COMPLETE picture:
+REMOVE:
 
-* End-to-end pipeline (step-by-step)
-* Data flow (text → features → models → KG → analysis)
-* What the final output should look like
+* unnecessary or redundant parts
 
 ---
 
-11. RESEARCH PAPER READINESS:
+10. FINAL RECOMMENDATION:
 
-* Is this project publishable in current form?
-* What must be improved to reach IEEE/ACM level?
-* What experiments/results are required?
+* Is it a good idea to start full project now?
+* Or refine demo first?
+
+Be honest and practical.
 
 ---
 
 ⚠️ FINAL INSTRUCTION:
 
-Think like a strict research supervisor.
+Be extremely realistic.
 
-Your goal is NOT to make this easy.
+Do NOT:
 
-Your goal is to ensure this project:
+* suggest heavy training without justification
+* assume unlimited compute
 
-* is technically strong
-* is clearly structured
-* has real novelty
-* is worthy of a research paper
+Do:
 
-Push the design to the next level.
+* optimize for RTX 2050
+* prioritize efficiency + correctness
+
+Your goal is to help me:
+
+* not waste time
+* get correct results
+* move toward research-level output
