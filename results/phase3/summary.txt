@@ -1,0 +1,11 @@
+Phase 3
+Yield: 5000
+Dist:
+disclosure_type
+NONE           1310
+STRATEGIC      1287
+FINANCIAL      1196
+LEGAL           567
+RELATIONAL      355
+PII             284
+REAL_ESTATE       1
