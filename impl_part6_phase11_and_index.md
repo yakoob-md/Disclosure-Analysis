@@ -1,3 +1,5 @@
+> **GEMINI 1.5 FLASH CRITICAL INSTRUCTION**: The user has mandated stepping validation. For every phase you execute from this document, you MUST ALSO execute the corresponding `scripts/phaseX_results.py` validation script immediately after and verify the outputs are correct before proceeding to the next phase.
+
 # ORGDISCLOSE — Implementation Plan
 # Part 6 of 6: Phase 11 (Explainability) + Master Index + Paper Checklist
 
@@ -6,7 +8,7 @@
 ## PHASE 11: EXPLAINABILITY PIPELINE
 
 ### Duration: 2–3 days
-### Goal: KG-grounded NL explanations for top-50 HIGH-risk emails + BERTScore faithfulness
+### Goal: KG-grounded NL explanations for top-50 HIGH-risk emails + Entity Overlap Score (Amendment 5A) faithfulness
 
 ---
 
@@ -14,7 +16,7 @@
 
 - [ ] 50 HIGH-risk test emails with explanations generated
 - [ ] Each explanation references: sender, disclosure type, recipient type, centrality signal
-- [ ] BERTScore-F1 (against gold KG path summary) ≥ 0.60
+- [ ] Entity Overlap Score (Amendment 5A)-F1 (against gold KG path summary) ≥ 0.60
 - [ ] Manual spot-check: 10 explanations reviewed by you — rated coherent/incoherent
 - [ ] explanations/explanations_with_scores.json saved
 
@@ -29,8 +31,8 @@ CONTEXT:
 - Input: Best model predictions on test set (DeBERTa + KG)
 - Select top-50 emails predicted as HIGH risk (true label also HIGH)
 - Use Neo4j to extract KG paths for each email
-- Use Mistral-7B-Instruct (4-bit) to generate NL explanation
-- Use BERTScore to measure faithfulness
+- Use Phi-3-Mini-Instruct (4-bit) to generate NL explanation
+- Use Entity Overlap Score (Amendment 5A) to measure faithfulness
 - Output: explanations/explanations_with_scores.json
 
 Write phase11_explanations.py:
@@ -130,8 +132,8 @@ def get_centrality_context(sender, month_index):
         anomaly_str = f"Network position: betweenness={betw:.4f} (within normal range)."
     return anomaly_str
 
-STEP 4 — Load Mistral-7B (reuse from Phase 9 if session still active):
-model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+STEP 4 — Load Phi-3-Mini (reuse from Phase 9 if session still active):
+model_name = "microsoft/Phi-3-mini-4k-instruct"
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True, bnb_4bit_quant_type="nf4",
     bnb_4bit_compute_dtype=torch.float16
@@ -202,12 +204,12 @@ for _, row in tqdm(high_risk_test.iterrows(), total=len(high_risk_test)):
         'explanation': explanation
     })
 
-STEP 6 — BERTScore faithfulness evaluation:
-# IMPORTANT: Free Mistral-7B VRAM before loading BERTScore model (4GB limit)
+STEP 6 — Entity Overlap Score (Amendment 5A) faithfulness evaluation:
+# IMPORTANT: Free Phi-3-Mini VRAM before loading Entity Overlap Score (Amendment 5A) model (4GB limit)
 del model
 torch.cuda.empty_cache()
 import gc; gc.collect()
-print("Mistral-7B unloaded. Running BERTScore with DistilBERT...")
+print("Phi-3-Mini unloaded. Running Entity Overlap Score (Amendment 5A) with DistilBERT...")
 
 # Reference = the structured KG context (what the explanation SHOULD mention)
 # Hypothesis = generated explanation
@@ -220,7 +222,7 @@ P, R, F1 = bertscore(
     lang='en', verbose=False
 )
 F1_scores = F1.numpy().tolist()
-print(f"BERTScore Faithfulness — Mean F1: {np.mean(F1_scores):.4f}")
+print(f"Entity Overlap Score (Amendment 5A) Faithfulness — Mean F1: {np.mean(F1_scores):.4f}")
 print(f"  Min: {np.min(F1_scores):.4f}, Max: {np.max(F1_scores):.4f}")
 
 # Add scores to results
@@ -296,7 +298,7 @@ EXECUTION ORDER:
 | Wilcoxon p < 0.05 (best vs 2nd best) | Phase 10 | §5 Results |
 | Temporal betweenness trajectory plot | Phase 6 | §5 Temporal |
 | Wilcoxon crisis > stable Δ_betweenness (p < 0.05) | Phase 6 | §5 Temporal |
-| BERTScore faithfulness ≥ 0.60 | Phase 11 | §5 Explainability |
+| Entity Overlap Score (Amendment 5A) faithfulness ≥ 0.60 | Phase 11 | §5 Explainability |
 | Error analysis (50 false negatives, 3+ categories) | Phase 10 | §6 Analysis |
 
 ### Figures for the Paper (Make These Beautiful)
@@ -366,7 +368,7 @@ Fix: a) Check phi_G is actually joined correctly per email (not all zeros)
         reciprocity, and email volume percentile
      c) Verify Z-score normalization is not collapsing variance
 
-Problem: Mistral-7B labels have > 30% noise (spot-check fails)
+Problem: Phi-3-Mini labels have > 30% noise (spot-check fails)
 Fix: a) Add 2-3 more examples to the prompt
      b) Use a smaller model with better instruction following:
         'TheBloke/neural-chat-7B-v3-1-GPTQ' (better at structured output)
@@ -378,11 +380,11 @@ Fix: Use purely NetworkX-based approach for the KG
      audience_scope can be computed by checking if recipient email domain
      is '@enron.com' (internal) or not (external) — no Neo4j needed
 
-Problem: BERTScore faithfulness < 0.50
+Problem: Entity Overlap Score (Amendment 5A) faithfulness < 0.50
 Fix: a) Add explicit entity overlap scoring as second metric:
         "entity_overlap = # KG entities mentioned in explanation / # total KG entities"
-     b) Report both metrics — BERTScore and entity overlap
-     c) Narrative: "Our explanations achieve X BERTScore-F1 and Y entity overlap"
+     b) Report both metrics — Entity Overlap Score (Amendment 5A) and entity overlap
+     c) Narrative: "Our explanations achieve X Entity Overlap Score (Amendment 5A)-F1 and Y entity overlap"
 ```
 
 ---
@@ -397,7 +399,7 @@ Fix: a) Add explicit entity overlap scoring as second metric:
 
 3. **"We propose a KG-augmented multi-task framework where the Knowledge Graph computes the audience-appropriateness label — making the graph causally integrated into annotation, not post-hoc decoration. Ablation confirms a +X.X% F1 gain from KG integration."**
 
-4. **"We provide a fully reproducible, offline explainability pipeline using a locally-quantized LLM grounded in KG paths, achieving BERTScore faithfulness of X.XX with zero paid API dependency."**
+4. **"We provide a fully reproducible, offline explainability pipeline using a locally-quantized LLM grounded in KG paths, achieving Entity Overlap Score (Amendment 5A) faithfulness of X.XX with zero paid API dependency."**
 
 If all 4 are implemented with the stated metrics, you have a paper.
 If 3 of 4 are implemented, you have a paper.

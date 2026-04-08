@@ -1,3 +1,5 @@
+> **GEMINI 1.5 FLASH CRITICAL INSTRUCTION**: The user has mandated stepping validation. For every phase you execute from this document, you MUST ALSO execute the corresponding `scripts/phaseX_results.py` validation script immediately after and verify the outputs are correct before proceeding to the next phase.
+
 # ORGDISCLOSE — Implementation Plan
 # Part 4 of 6: Phase 6 (Network Analysis) + Phase 7 (ML Models) + Phase 8 (DL Models)
 
@@ -732,6 +734,7 @@ class DisclosureDataset(Dataset):
     def __len__(self): return len(self.y_type)
     def __getitem__(self, i):
         # Safe token_type_ids access — DeBERTa-v3 does not use them
+        # AMENDMENT 4A: DeBERTa does not use token_type_ids.
         item = {
             'input_ids':      self.encodings['input_ids'][i],
             'attention_mask': self.encodings['attention_mask'][i],
@@ -798,6 +801,9 @@ def train_deberta(include_kg=True, lr=2e-5, epochs=5, batch_size=16, patience=3)
     test_ds  = DisclosureDataset(test_df,  phi_g_test,  include_kg)
     
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=True)
+    
+    # AMENDMENT 4B: RTX 2050 VRAM optimization
+    model.deberta.gradient_checkpointing_enable()
     val_loader   = DataLoader(val_ds,   batch_size=batch_size)
     test_loader  = DataLoader(test_ds,  batch_size=batch_size)
     

@@ -1,0 +1,3 @@
+Phase 1 Validation
+Parsed Rows: 517401
+Unique Senders: 20328

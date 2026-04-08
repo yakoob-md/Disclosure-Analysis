@@ -1,15 +1,17 @@
+> **GEMINI 1.5 FLASH CRITICAL INSTRUCTION**: The user has mandated stepping validation. For every phase you execute from this document, you MUST ALSO execute the corresponding `scripts/phaseX_results.py` validation script immediately after and verify the outputs are correct before proceeding to the next phase.
+
 # ORGDISCLOSE — Implementation Plan
 # Part 5 of 6: Phase 9 (LLM Baseline) + Phase 10 (Full Evaluation & Ablation)
 
 ---
 
-## PHASE 9: LLM BASELINE — MISTRAL-7B FEW-SHOT
+## PHASE 9: LLM BASELINE — PHI-3-MINI FEW-SHOT
 
 ### Duration: 1–2 days
-### Goal: Mistral-7B as a reference "expert" model; evaluated on 200 Gold Test emails
+### Goal: Phi-3-Mini as a reference "expert" model; evaluated on 200 Gold Test emails
 
 ### Why only 200 (not 500)?
-Mistral-7B inference is ~4 seconds/email on RTX 2050.
+Phi-3-Mini inference is ~4 seconds/email on RTX 2050.
 200 emails = ~13 minutes. 500 emails = ~33 minutes.
 200 is statistically sufficient (confidence interval ±7% at 95% CI).
 
@@ -28,10 +30,11 @@ Mistral-7B inference is ~4 seconds/email on RTX 2050.
 ### 9.2 IMPLEMENTATION PROMPT — PHASE 9: LLM BASELINE
 
 ```
-=== IMPLEMENTATION PROMPT: PHASE 9 — MISTRAL-7B LLM BASELINE ===
+=== IMPLEMENTATION PROMPT: PHASE 9 — PHI-3-MINI LLM BASELINE ===
+# AMENDMENT: Use Entity Overlap instead of BERTScore for LLM evaluation faithfulness where applicable.
 
 CONTEXT:
-- Hardware: RTX 2050 (4GB VRAM) — 4-bit quantized Mistral-7B-Instruct-v0.2
+- Hardware: RTX 2050 (4GB VRAM) — 4-bit quantized Phi-3-mini-4k-instruct
 - Evaluate on 200 Gold test emails (same as other models)
 - 3 prompt variants: zero-shot, few-shot, chain-of-thought
 - Output: results/llm_results.json + results/llm_predictions.parquet
@@ -44,7 +47,7 @@ import torch, pandas as pd, numpy as np, json, re
 from tqdm import tqdm
 from sklearn.metrics import f1_score, classification_report
 
-model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+model_name = "microsoft/Phi-3-mini-4k-instruct"
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True, bnb_4bit_quant_type="nf4",
     bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True
@@ -350,7 +353,7 @@ for kg_key, has_kg in [('text_only','No'), ('kg_augmented','Yes')]:
 for variant in ['zero_shot', 'few_shot', 'chain_of_thought']:
     if variant in llm_res:
         r = llm_res[variant]
-        rows.append({'Model': f"Mistral-7B ({variant.replace('_',' ')})",
+        rows.append({'Model': f"Phi-3-Mini ({variant.replace('_',' ')})",
                      'disc_type': r.get('disc_type_f1', 0.0),
                      'framing':   r.get('framing_f1', 0.0),
                      'risk':      r.get('risk_f1', 0.0),

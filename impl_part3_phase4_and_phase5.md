@@ -1,3 +1,5 @@
+> **GEMINI 1.5 FLASH CRITICAL INSTRUCTION**: The user has mandated stepping validation. For every phase you execute from this document, you MUST ALSO execute the corresponding `scripts/phaseX_results.py` validation script immediately after and verify the outputs are correct before proceeding to the next phase.
+
 # ORGDISCLOSE — Implementation Plan
 # Part 3 of 6: Phase 4 (Feature Engineering) + Phase 5 (KG Construction)
 
@@ -366,50 +368,34 @@ for i in range(0, len(all_emails), BATCH_SIZE):
         print(f"Ingested {i+BATCH_SIZE}/{len(all_emails)} emails")
 
 STEP 5 — Create SENT and RECEIVED edges (batched Python — NOT cartesian Cypher):
-# Cypher cartesian MATCH is O(n^2) and will timeout; use Python loop instead
-for _, row in tqdm(all_emails.iterrows(), total=len(all_emails), desc='Creating edges'):
-    sender_raw = str(row.get('sender', '')).lower()
-    mid = str(row['mid'])
-    
-    # Match sender to known employee
-    matched_emp = None
-    for emp_tuple in EMPLOYEES:
-        emp_email = emp_tuple[0]
-        if emp_email.split('@')[0] in sender_raw:
-            matched_emp = emp_email
-            break
-    
-    with driver.session(database="orgdisclose") as session:
-        # Create SENT edge if sender matched
-        if matched_emp:
-            session.run(
-                "MATCH (emp:Employee {email:$emp}), (m:Email {mid:$mid}) "
-                "MERGE (emp)-[:SENT]->(m)",
-                emp=matched_emp, mid=mid
-            )
-        
-        # Create RECEIVED_BY edges
-        recipients_str = str(row.get('recipients',''))
-        if not recipients_str or recipients_str == 'nan':
-            continue
-        for recip in recipients_str.split(';')[:10]:
-            recip = recip.strip().lower()
-            if not recip:
-                continue
-            if '@enron.com' in recip:
-                session.run(
-                    "MATCH (email:Email {mid:$mid}) "
-                    "MERGE (ext:Employee {email:$recip}) "
-                    "MERGE (email)-[:RECEIVED_BY]->(ext)",
-                    mid=mid, recip=recip
-                )
-            else:
-                session.run(
-                    "MATCH (email:Email {mid:$mid}) "
-                    "MERGE (ext:ExternalParty {email:$recip}) "
-                    "MERGE (email)-[:RECEIVED_BY]->(ext)",
-                    mid=mid, recip=recip
-                )
+# AMENDMENT 3C: Use a single session with transaction batching to prevent Neo4j timeout crashes.
+BATCH_SIZE = 500
+with driver.session(database="orgdisclose") as session:
+    for i in tqdm(range(0, len(all_emails), BATCH_SIZE), desc='Creating edges'):
+        batch = all_emails.iloc[i:i+BATCH_SIZE]
+        for _, row in batch.iterrows():
+            sender_raw = str(row.get('sender', '')).lower()
+            mid = str(row['mid'])
+            
+            matched_emp = None
+            for emp_tuple in EMPLOYEES:
+                if emp_tuple[0].split('@')[0] in sender_raw:
+                    matched_emp = emp_tuple[0]
+                    break
+            
+            if matched_emp:
+                session.run("MATCH (emp:Employee {email:$emp}), (m:Email {mid:$mid}) MERGE (emp)-[:SENT]->(m)", emp=matched_emp, mid=mid)
+            
+            recipients_str = str(row.get('recipients',''))
+            if not recipients_str or recipients_str == 'nan': continue
+            
+            for recip in recipients_str.split(';')[:10]:
+                recip = recip.strip().lower()
+                if not recip: continue
+                if '@enron.com' in recip:
+                    session.run("MATCH (email:Email {mid:$mid}) MERGE (ext:Employee {email:$recip}) MERGE (email)-[:RECEIVED_BY]->(ext)", mid=mid, recip=recip)
+                else:
+                    session.run("MATCH (email:Email {mid:$mid}) MERGE (ext:ExternalParty {email:$recip}) MERGE (email)-[:RECEIVED_BY]->(ext)", mid=mid, recip=recip)
 
 STEP 6 — Compute audience_scope via Cypher:
 # audience_scope = EXTERNAL if any recipient is ExternalParty

@@ -1,3 +1,5 @@
+> **GEMINI 1.5 FLASH CRITICAL INSTRUCTION**: The user has mandated stepping validation. For every phase you execute from this document, you MUST ALSO execute the corresponding `scripts/phaseX_results.py` validation script immediately after and verify the outputs are correct before proceeding to the next phase.
+
 # ORGDISCLOSE — Implementation Plan
 # Part 1 of 6: Novelty Verdict + Phase 1 (Environment & Data Acquisition)
 
@@ -35,7 +37,7 @@ Here is exactly why, stated without hedging:
 - If KG ablation shows < 1% F1 drop — your KG is decorative, paper rejected
 - If annotation κ < 0.6 on disc_type — labels are noisy, results meaningless
 - If you skip the temporal analysis section — you lose your most unique empirical finding
-- If Mistral-7B explanations score < 0.60 BERTScore faithfulness — explainability fails
+- If Phi-3-Mini explanations score < 0.60 BERTScore faithfulness — explainability fails
 
 ### Commit to this statement right now:
 "My paper's core claim is: temporal graph topology is a necessary and measurable

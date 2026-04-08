@@ -1,3 +1,5 @@
+> **GEMINI 1.5 FLASH CRITICAL INSTRUCTION**: The user has mandated stepping validation. For every phase you execute from this document, you MUST ALSO execute the corresponding `scripts/phaseX_results.py` validation script immediately after and verify the outputs are correct before proceeding to the next phase.
+
 # ORGDISCLOSE — Implementation Plan
 # Part 2 of 6: Phase 2 (Preprocessing) + Phase 3 (Annotation)
 
@@ -302,13 +304,13 @@ DECISION TREE FOR framing:
 ### 3.4 IMPLEMENTATION PROMPT — PHASE 3A: LLM AUTO-LABELING (SILVER SET)
 
 ```
-=== IMPLEMENTATION PROMPT: PHASE 3A — LLM AUTO-LABELING WITH LOCAL MISTRAL-7B ===
+=== IMPLEMENTATION PROMPT: PHASE 3A — LLM AUTO-LABELING WITH LOCAL PHI-3-MINI ===
 
 CONTEXT:
 - Input: data/processed/emails_silver_pool.parquet (5,000 rows)
 - Output: data/labeled/emails_labeled_silver.parquet
 - Hardware: RTX 2050 (4GB VRAM) — use 4-bit quantization
-- No internet API — use local Mistral-7B-Instruct
+- No internet API — use local Phi-3-Mini-Instruct
 
 Write phase3a_autolabel.py that does the following:
 
@@ -316,7 +318,7 @@ STEP 1 — Load model in 4-bit:
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import torch
 
-model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+model_name = "microsoft/Phi-3-mini-4k-instruct"
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
