@@ -58,37 +58,53 @@ memo_canon = {}
 
 def build_graph(month_df):
     """
-    Builds a directed graph with resolved recipient names.
-    Fixes the 'Bipartite Disconnect' bug.
+    Builds a directed graph with GLOBAL_EXTERNAL node for connectivity.
+    Restores hubs by relaxing the recipient cap and weighting by 1/N.
     """
     G = nx.DiGraph()
     edge_list = []
+    GLOBAL_EXT = "GLOBAL_EXTERNAL"
     
     for row in month_df.itertuples(index=False):
         sender = row.sender_canonical
         recips_str = str(row.recipients) if pd.notna(row.recipients) else ""
         
-        # Rule 4: Cap recipients at 10 to prevent broadcast dilution
+        # Rule 4: Relaxed cap to 50 to capture hubs, but weight by 1/N
+        raw_recips = [r.strip() for r in recips_str.split(';') if r.strip() and r.strip() != 'nan']
+        n_recips = len(raw_recips)
+        if n_recips == 0: continue
+        
+        # Edge weight is inverse to recipient count to prevent broadcast flooding
+        edge_weight = 1.0 / min(n_recips, 50) 
+        
         count = 0
-        for recip in recips_str.split(';'):
-            if count >= 10: break
-            recip = recip.strip()
-            if not recip or recip == 'nan': continue
+        for recip in raw_recips:
+            if count >= 50: break
             
             # Rule 2.1: Resolve recipient
             if recip not in memo_canon:
                 memo_canon[recip] = resolve_alias_with_fuzzy(recip)
             recip_canon = memo_canon[recip]
             
-            # Rule 3: Exclude self-loops & ensure target is in node set
-            if recip_canon in all_nodes and recip_canon != sender:
-                edge_list.append((sender, recip_canon))
+            # Rule 3: Map unknown to GLOBAL_EXTERNAL instead of dropping
+            target = recip_canon if recip_canon in all_nodes else GLOBAL_EXT
+            
+            # Rule 3.1: Exclude self-loops
+            if target != sender:
+                edge_list.append((sender, target, edge_weight))
                 count += 1
                 
-    # Rule 1: Only add active nodes
-    edge_counts = Counter(edge_list)
-    for (u, v), w in edge_counts.items():
-        G.add_edge(u, v, weight=w)
+    # Add weighted edges
+    for u, v, w in edge_list:
+        if G.has_edge(u, v):
+            G[u][v]['weight'] += w
+        else:
+            G.add_edge(u, v, weight=w)
+            
+    # Ensure GLOBAL_EXT exists to stabilize topology
+    if GLOBAL_EXT not in G:
+        G.add_node(GLOBAL_EXT)
+        
     return G
 
 def compute_all_metrics(G):
